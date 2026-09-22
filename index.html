@@ -10,9 +10,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-<!-- Librerie da CDN -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<!-- Le librerie Chart.js e PapaParse vengono caricate dinamicamente
+     più sotto, con un CDN di riserva in caso il primo non risponda -->
 
 <style>
 /* ============================================================
@@ -395,6 +394,40 @@ tbody tr:hover{background:var(--surface-2);}
 
 <script>
 /* ============================================================
+   CARICAMENTO LIBRERIE ESTERNE (con CDN di riserva)
+   Se cdnjs non risponde per qualche motivo (blocchi di rete,
+   estensioni del browser, timeout) si prova automaticamente
+   jsdelivr come alternativa, così le librerie non restano
+   "mancanti" in silenzio come è successo prima.
+   ============================================================ */
+function loadScript(url){
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => resolve(url);
+    s.onerror = () => reject(new Error('Impossibile caricare ' + url));
+    document.head.appendChild(s);
+  });
+}
+async function loadWithFallback(urls){
+  for (const url of urls){
+    try { await loadScript(url); return true; } catch (e) { /* prova la successiva */ }
+  }
+  return false;
+}
+async function loadLibraries(){
+  const papaOk = await loadWithFallback([
+    'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js',
+    'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js'
+  ]);
+  const chartOk = await loadWithFallback([
+    'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js',
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js'
+  ]);
+  return { papaOk, chartOk };
+}
+
+/* ============================================================
    CONFIGURAZIONE — personalizza qui titolo, URL del CSV e budget
    ============================================================ */
 const CONFIG = {
@@ -699,6 +732,12 @@ function renderKPIs(){
 function destroyChart(key){ if (charts[key]) { charts[key].destroy(); delete charts[key]; } }
 
 function renderCharts(){
+  if (typeof Chart === 'undefined'){
+    document.querySelectorAll('.chart-wrap').forEach(el => {
+      el.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding-top:40px;">Grafico non disponibile: la libreria Chart.js non si è caricata. Ricarica la pagina.</p>';
+    });
+    return;
+  }
   renderTrendChart();
   renderDoughnutChart();
   renderTop5Chart();
@@ -949,7 +988,7 @@ document.getElementById('toggleDoughnut').addEventListener('click', e => {
   document.querySelectorAll('#toggleDoughnut button').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   doughnutMode = btn.dataset.val;
-  renderDoughnutChart();
+  if (typeof Chart !== 'undefined') renderDoughnutChart();
 });
 
 document.getElementById('btnTheme').addEventListener('click', () => {
@@ -966,8 +1005,20 @@ if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').match
 }
 
 /* ---------- AVVIO ---------- */
-fetchData();
-setInterval(fetchData, CONFIG.AUTO_REFRESH_MS);
+(async function start(){
+  showSpinner(true);
+  const libs = await loadLibraries();
+  if (!libs.papaOk){
+    showSpinner(false);
+    showError('Impossibile caricare la libreria di lettura CSV (PapaParse), anche dal CDN di riserva. Controlla la connessione, eventuali blocchi (adblock/firewall aziendale) e ricarica la pagina.');
+    return;
+  }
+  if (!libs.chartOk){
+    console.warn('Chart.js non disponibile: i grafici saranno disattivati, KPI e tabella restano funzionanti.');
+  }
+  fetchData();
+  setInterval(fetchData, CONFIG.AUTO_REFRESH_MS);
+})();
 </script>
 
 <!--
